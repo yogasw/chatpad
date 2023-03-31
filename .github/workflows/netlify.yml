@@ -12,6 +12,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: check dir
+        run: ls -lah
       - name: Install dependency
         run: npm install
       - name: Build app
