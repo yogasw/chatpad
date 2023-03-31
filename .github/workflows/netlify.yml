@@ -1,4 +1,4 @@
-name: Sync Upstream
+name: Publish to Netlify
 on:
   push:
     branches:
