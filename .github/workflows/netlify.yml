@@ -5,7 +5,9 @@ on:
       - "main"
 
   workflow_dispatch:
-
+env:
+    NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+    NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
 jobs:
   build:
     runs-on: ubuntu-latest
