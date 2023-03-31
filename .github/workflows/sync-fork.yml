@@ -1,1 +1,25 @@
+name: sync fork
 
+on: 
+  workflow_dispatch: 
+  schedule: 
+    - cron: "0 13 * * 1"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps: 
+      - uses: action/checkout@v2
+      - name: Sync and merge upstream repository with your current repository
+        uses: dabreadman/sync-upstream-repo@v1.3.0
+        with:
+          # URL of gitHub public upstream repo
+          upstream_repo: deiucanta/chatpad
+          # Branch to merge from upstream (defaults to downstream branch)
+          upstream_branch: main# optional, default is main
+          # Branch to merge into downstream
+          downstream_branch: main# optional, default is 
+          # GitHub Bot token
+          token: ${{secrets.TOKEN}}
+      
