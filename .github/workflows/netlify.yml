@@ -1,0 +1,19 @@
+name: Sync Upstream
+on:
+  push:
+    branches:
+      - "main"
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Netlify Actions
+        # You may pin to the exact commit or the version.
+        # uses: nwtgck/actions-netlify@5da65c9f74c7961c5501a3ba329b8d0912f39c03
+        uses: nwtgck/actions-netlify@v2.0.0
+        with:
+          # Publish directory
+          publish-dir: dist
