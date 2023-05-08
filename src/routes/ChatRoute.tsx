@@ -13,20 +13,17 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useLiveQuery } from "dexie-react-hooks";
-import { findLast } from "lodash";
 import { nanoid } from "nanoid";
-import { useState } from "react";
+import { KeyboardEvent, useState, type ChangeEvent } from "react";
 import { AiOutlineSend } from "react-icons/ai";
 import { MessageItem } from "../components/MessageItem";
 import { db } from "../db";
 import { useChatId } from "../hooks/useChatId";
+import { config } from "../utils/config";
 import {
-  writingCharacters,
-  writingFormats,
-  writingStyles,
-  writingTones,
-} from "../utils/constants";
-import { createChatCompletion } from "../utils/openai";
+  createChatCompletion,
+  createStreamChatCompletion,
+} from "../utils/openai";
 
 export function ChatRoute() {
   const chatId = useChatId();
@@ -37,7 +34,13 @@ export function ChatRoute() {
     if (!chatId) return [];
     return db.messages.where("chatId").equals(chatId).sortBy("createdAt");
   }, [chatId]);
+  const userMessages =
+    messages
+      ?.filter((message) => message.role === "user")
+      .map((message) => message.content) || [];
+  const [userMsgIndex, setUserMsgIndex] = useState(0);
   const [content, setContent] = useState("");
+  const [contentDraft, setContentDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const chat = useLiveQuery(async () => {
@@ -96,37 +99,33 @@ export function ChatRoute() {
       });
       setContent("");
 
-      const result = await createChatCompletion(apiKey, [
-        {
-          role: "system",
-          content: getSystemMessage(),
-        },
-        ...(messages ?? []).map((message) => ({
-          role: message.role,
-          content: message.content,
-        })),
-        { role: "user", content },
-      ]);
-
-      const assistantMessage = result.data.choices[0].message?.content;
-      if (result.data.usage) {
-        await db.chats.where({ id: chatId }).modify((chat) => {
-          if (chat.totalTokens) {
-            chat.totalTokens += result.data.usage!.total_tokens;
-          } else {
-            chat.totalTokens = result.data.usage!.total_tokens;
-          }
-        });
-      }
-      setSubmitting(false);
-
+      const messageId = nanoid();
       await db.messages.add({
-        id: nanoid(),
+        id: messageId,
         chatId,
-        content: assistantMessage ?? "unknown reponse",
+        content: "█",
         role: "assistant",
         createdAt: new Date(),
       });
+
+      await createStreamChatCompletion(
+        apiKey,
+        [
+          {
+            role: "system",
+            content: getSystemMessage(),
+          },
+          ...(messages ?? []).map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          { role: "user", content },
+        ],
+        chatId,
+        messageId
+      );
+
+      setSubmitting(false);
 
       if (chat?.description === "New Chat") {
         const messages = await db.messages
@@ -183,6 +182,38 @@ export function ChatRoute() {
     }
   };
 
+  const onUserMsgToggle = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const { selectionStart, selectionEnd } = event.currentTarget;
+    if (
+      !["ArrowUp", "ArrowDown"].includes(event.code) ||
+      selectionStart !== selectionEnd ||
+      (event.code === "ArrowUp" && selectionStart !== 0) ||
+      (event.code === "ArrowDown" &&
+        selectionStart !== event.currentTarget.value.length)
+    ) {
+      // do nothing
+      return;
+    }
+    event.preventDefault();
+
+    const newMsgIndex = userMsgIndex + (event.code === "ArrowUp" ? 1 : -1);
+    const allMessages = [contentDraft, ...Array.from(userMessages).reverse()];
+
+    if (newMsgIndex < 0 || newMsgIndex >= allMessages.length) {
+      // index out of range, do nothing
+      return;
+    }
+    setContent(allMessages.at(newMsgIndex) || "");
+    setUserMsgIndex(newMsgIndex);
+  };
+
+  const onContentChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const { value } = event.currentTarget;
+    setContent(value);
+    setContentDraft(value);
+    setUserMsgIndex(0);
+  };
+
   if (!chatId) return null;
 
   return (
@@ -232,7 +263,7 @@ export function ChatRoute() {
               <Select
                 value={writingCharacter}
                 onChange={setWritingCharacter}
-                data={writingCharacters}
+                data={config.writingCharacters}
                 placeholder="Character"
                 variant="filled"
                 searchable
@@ -242,7 +273,7 @@ export function ChatRoute() {
               <Select
                 value={writingTone}
                 onChange={setWritingTone}
-                data={writingTones}
+                data={config.writingTones}
                 placeholder="Tone"
                 variant="filled"
                 searchable
@@ -252,7 +283,7 @@ export function ChatRoute() {
               <Select
                 value={writingStyle}
                 onChange={setWritingStyle}
-                data={writingStyles}
+                data={config.writingStyles}
                 placeholder="Style"
                 variant="filled"
                 searchable
@@ -262,7 +293,7 @@ export function ChatRoute() {
               <Select
                 value={writingFormat}
                 onChange={setWritingFormat}
-                data={writingFormats}
+                data={config.writingFormats}
                 placeholder="Format"
                 variant="filled"
                 searchable
@@ -282,36 +313,18 @@ export function ChatRoute() {
               minRows={1}
               maxRows={5}
               value={content}
-              onChange={(event) => setContent(event.currentTarget.value)}
+              onChange={onContentChange}
               onKeyDown={async (event) => {
                 if (event.code === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   submit();
+                  setUserMsgIndex(0);
                 }
                 if (event.code === "ArrowUp") {
-                  const { selectionStart, selectionEnd } = event.currentTarget;
-                  if (selectionStart !== selectionEnd) return;
-                  if (selectionStart !== 0) return;
-                  event.preventDefault();
-                  const nextUserMessage = findLast(
-                    messages,
-                    (message) => message.role === "user"
-                  );
-                  setContent(nextUserMessage?.content ?? "");
+                  onUserMsgToggle(event);
                 }
                 if (event.code === "ArrowDown") {
-                  const { selectionStart, selectionEnd } = event.currentTarget;
-                  if (selectionStart !== selectionEnd) return;
-                  if (selectionStart !== event.currentTarget.value.length)
-                    return;
-                  event.preventDefault();
-                  const lastUserMessage = findLast(
-                    messages,
-                    (message) => message.role === "user"
-                  );
-                  if (lastUserMessage?.content === content) {
-                    setContent("");
-                  }
+                  onUserMsgToggle(event);
                 }
               }}
             />
